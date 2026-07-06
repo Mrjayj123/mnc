@@ -42,8 +42,8 @@ async function apiFetch(path, opts = {}) {
 // For production, replace this with real JWT/session calls to your backend.
 
 const DEMO_USERS = [
-  { name: "Admin User",  id_number: "12345678", password: "admin123" },
-  { name: "Jane Wanjiku", id_number: "12345678", password: "password" },
+  { name: "Admin User",  id_number: "ID001", password: "admin123" },
+  { name: "Jane Wanjiku", id_number: "ID002", password: "password" },
 ];
 
 function authenticate(name, id_number, password) {
