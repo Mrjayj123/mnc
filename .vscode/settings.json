@@ -1,0 +1,7 @@
+{
+  "python.defaultInterpreterPath": "/home/jay_joel/PYTHON/mnc/backend/env/bin/python",
+  "python.analysis.extraPaths": [
+    "/home/jay_joel/PYTHON/mnc/backend"
+  ],
+  "python.terminal.activateEnvironment": true
+}
