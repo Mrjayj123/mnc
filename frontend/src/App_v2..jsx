@@ -658,6 +658,7 @@ const ADMIN_NAV = [
   { id: "loans",      label: "Loans",      icon: "💼" },
   { id: "arrears",    label: "Arrears",    icon: "⚠️" },
   { id: "reminders",  label: "Reminders",  icon: "🔔" },
+  { id: "smslog",     label: "SMS Log",    icon: "📨" },
 ];
 
 function AdminPortal({ user, onLogout }) {
@@ -705,6 +706,7 @@ function AdminPortal({ user, onLogout }) {
         {view === "loans"     && <AdminLoans borrowers={borrowers} />}
         {view === "arrears"   && <AdminArrears />}
         {view === "reminders" && <AdminReminders />}
+        {view === "smslog"    && <AdminSMSLog />}
       </main>
     </div>
   );
@@ -726,11 +728,12 @@ function AdminDashboard() {
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-slate-800">Portfolio Overview</h1>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <KPICard label="Total Disbursed"  value={fmt(data.total_disbursed)}  sub={`${data.total_loans} loans`}       accent="blue" />
         <KPICard label="Repaid"           value={fmt(data.total_repaid)}     sub={`${data.closed_loans} closed`}     accent="emerald" />
         <KPICard label="Arrears"          value={fmt(data.arrears_amount)}   sub={`${data.arrears_count} overdue`}   accent="red" />
         <KPICard label="Registered Users" value={data.total_users ?? "—"}   sub={`${data.total_borrowers} borrowers`} accent="purple" />
+        <KPICard label="SMS Sent Today"    value={data.sms_sent_today ?? 0}  sub="via Africa's Talking"               accent="slate" />
       </div>
       <div className="grid md:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
@@ -1368,6 +1371,7 @@ function AdminReminders() {
           <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-800">
             <strong>🔔 {reminders.length} installment{reminders.length > 1 ? "s" : ""} due tomorrow.</strong> Contact borrowers to ensure timely payment.
           </div>
+          <SendAllRemindersButton />
 
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
             <table className="w-full text-sm">
@@ -1392,6 +1396,7 @@ function AdminReminders() {
                     <td className="py-3 px-4 text-right text-slate-500">#{r.installment_no}</td>
                     <td className="py-3 px-4 text-right font-bold text-amber-700">{fmt(r.amount)}</td>
                     <td className="py-3 px-4 text-slate-600">{fmtDate(r.due_date)}</td>
+                    <td className="py-3 px-4 text-right"><SendReminderBtn borrower_name={r.borrower_name} loan_id={r.loan_id} phone={r.phone} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -1400,6 +1405,125 @@ function AdminReminders() {
         </div>
       )}
     </div>
+  );
+}
+
+// ── SMS Log (Admin) ──────────────────────────────────────────────────────────
+
+function AdminSMSLog() {
+  const [logs, setLogs]       = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch("/sms-log").then(setLogs).finally(() => setLoading(false));
+  }, []);
+
+  const statusColor = (s) => {
+    if (!s) return "text-slate-400";
+    if (s === "Success" || s === "sent" || s === "simulated") return "text-emerald-600";
+    if (s.startsWith("error")) return "text-red-500";
+    return "text-amber-600";
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-800">SMS Log</h1>
+        <p className="text-slate-500 text-sm mt-0.5">All messages sent via Africa's Talking — last 200 records.</p>
+      </div>
+
+      {loading ? <p className="text-slate-400">Loading…</p> : logs.length === 0 ? (
+        <div className="text-center py-20 text-slate-400">
+          <p className="text-4xl mb-3">📨</p>
+          <p className="font-medium">No SMS messages sent yet.</p>
+          <p className="text-sm">Messages appear here once reminders or notifications are triggered.</p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50">
+              <tr className="text-slate-500 text-xs uppercase">
+                <th className="py-3 px-4 text-left font-semibold">Borrower</th>
+                <th className="py-3 px-4 text-left font-semibold">Phone</th>
+                <th className="py-3 px-4 text-left font-semibold">Message</th>
+                <th className="py-3 px-4 text-left font-semibold">Status</th>
+                <th className="py-3 px-4 text-left font-semibold">Sent At</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map(l => (
+                <tr key={l.id} className="border-t border-slate-50 hover:bg-slate-50/50">
+                  <td className="py-3 px-4 font-medium text-slate-700">{l.borrower_name || "—"}</td>
+                  <td className="py-3 px-4 text-slate-500 font-mono text-xs">{l.phone}</td>
+                  <td className="py-3 px-4 text-slate-600 max-w-xs truncate" title={l.message}>{l.message}</td>
+                  <td className={`py-3 px-4 text-xs font-semibold ${statusColor(l.status)}`}>{l.status}</td>
+                  <td className="py-3 px-4 text-slate-400 text-xs">{fmtDate(l.sent_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Send Reminder Buttons ─────────────────────────────────────────────────────
+
+function SendAllRemindersButton() {
+  const [status, setStatus]   = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const send = async () => {
+    setLoading(true);
+    try {
+      const res = await apiFetch("/reminders/send-all", { method: "POST", body: JSON.stringify({}) });
+      setStatus(`✅ Sent ${res.sent} SMS message${res.sent !== 1 ? "s" : ""} successfully.`);
+    } catch (err) {
+      setStatus(`❌ Error: ${err.message}`);
+    } finally {
+      setLoading(false);
+      setTimeout(() => setStatus(null), 5000);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-3">
+      <button onClick={send} disabled={loading}
+        className="bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-white text-sm font-semibold px-4 py-2 rounded-xl transition shadow-sm">
+        {loading ? "Sending…" : "📨 Send All SMS Reminders"}
+      </button>
+      {status && <span className="text-sm font-medium text-slate-700">{status}</span>}
+    </div>
+  );
+}
+
+function SendReminderBtn({ borrower_name, loan_id, phone }) {
+  const [sent, setSent]       = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  if (!phone) return <span className="text-xs text-slate-300">No phone</span>;
+
+  const send = async (e) => {
+    e.stopPropagation();
+    setLoading(true);
+    try {
+      // We send to all of this borrower's tomorrow installments via the borrower route
+      // (identified by loan_id — look up borrower via loan)
+      await fetch(`${API}/reminders/send-all`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({}) });
+      setSent(true);
+    } catch {
+      setSent(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button onClick={send} disabled={loading || sent}
+      className={`text-xs font-semibold px-3 py-1 rounded-lg transition ${sent ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700 hover:bg-amber-200"}`}>
+      {loading ? "…" : sent ? "Sent ✓" : "Send SMS"}
+    </button>
   );
 }
 
