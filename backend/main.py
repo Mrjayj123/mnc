@@ -27,10 +27,10 @@ CORS(app)
 
 DB_PATH = "loans.db"
 
-# ── Admin credentials (change before deploying) ───────────────────────────────
-ADMIN_ID_NUMBER = os.environ.get("ADMIN_ID_NUMBER", "00000000")
-ADMIN_PASSWORD  = os.environ.get("ADMIN_PASSWORD",  "Admin@MnC1")
-ADMIN_NAME      = "MnC Admin"
+# Admin credentials (change before deploying) ───────────────────────────────
+ADMIN_ID_NUMBER = os.environ.get("ADMIN_ID_NUMBER", "22238204")
+ADMIN_PASSWORD  = os.environ.get("ADMIN_PASSWORD",  "@Crownsandroses1")
+ADMIN_NAME      = "Admin"
 
 # ─── DB INIT ──────────────────────────────────────────────────────────────────
 
