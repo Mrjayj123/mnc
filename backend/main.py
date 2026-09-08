@@ -25,7 +25,10 @@ except ImportError:
 app = Flask(__name__)
 CORS(app)
 
-DB_PATH = "loans.db"
+DB_PATH = os.environ.get(
+    "DB_PATH",
+    os.path.join(os.path.dirname(__file__), "loans.db")
+)
 
 # Admin credentials (change before deploying) ───────────────────────────────
 ADMIN_ID_NUMBER = os.environ.get("ADMIN_ID_NUMBER", "22238204")
@@ -684,4 +687,8 @@ def dashboard():
     })
 
 if __name__ == "__main__":
-    app.run(debug=True, port=8000)
+    app.run(
+        debug=os.environ.get("FLASK_DEBUG", "0") == "1",
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", "8000")),
+    )
