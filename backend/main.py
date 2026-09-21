@@ -13,11 +13,15 @@ load_dotenv()
 # ── Africa's Talking SMS SDK ──────────────────────────────────────────────────
 try:
     import africastalking
-    AT_USERNAME = os.environ.get("AT_USERNAME", "sandbox")
-    AT_API_KEY  = os.environ.get("AT_API_KEY",  "007415aba2a81be22631ee1aa3182845e60ef555374d23c62be005afaa68c3b1eea1465a")
-    africastalking.initialize(AT_USERNAME, AT_API_KEY)
-    sms = africastalking.SMS
-    AT_ENABLED = True
+    AT_USERNAME = os.environ.get("AT_USERNAME")
+    AT_API_KEY  = os.environ.get("AT_API_KEY")
+    if AT_USERNAME and AT_API_KEY:
+        africastalking.initialize(AT_USERNAME, AT_API_KEY)
+        sms = africastalking.SMS
+        AT_ENABLED = True
+    else:
+        AT_ENABLED = False
+        sms = None
 except ImportError:
     AT_ENABLED = False
     sms = None
@@ -31,8 +35,8 @@ DB_PATH = os.environ.get(
 )
 
 # Admin credentials (change before deploying) ───────────────────────────────
-ADMIN_ID_NUMBER = os.environ.get("ADMIN_ID_NUMBER", "22238204")
-ADMIN_PASSWORD  = os.environ.get("ADMIN_PASSWORD",  "@Crownsandroses1")
+ADMIN_ID_NUMBER = os.environ.get("ADMIN_ID_NUMBER")
+ADMIN_PASSWORD  = os.environ.get("ADMIN_PASSWORD")
 ADMIN_NAME      = "Admin"
 
 # ─── DB INIT ──────────────────────────────────────────────────────────────────
@@ -108,6 +112,11 @@ def init_db():
     conn.close()
 
 init_db()
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"})
 
 # ─── AUTH HELPERS ─────────────────────────────────────────────────────────────
 
@@ -247,7 +256,7 @@ def login():
     id_number = data.get("id_number", "").strip()
     password  = data.get("password", "")
 
-    if id_number == ADMIN_ID_NUMBER and password == ADMIN_PASSWORD:
+    if ADMIN_ID_NUMBER and ADMIN_PASSWORD and id_number == ADMIN_ID_NUMBER and password == ADMIN_PASSWORD:
         return jsonify({"user": {"id": 0, "name": ADMIN_NAME, "id_number": ADMIN_ID_NUMBER,
                                   "role": "admin", "email": "admin@mnc.com"}})
 
