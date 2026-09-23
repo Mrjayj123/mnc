@@ -456,7 +456,7 @@ function LoanScheduleModal({ loan, onClose, readonly }) {
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <div>
             <h2 className="font-bold text-slate-800 text-lg">{loan.borrower_name}</h2>
-            <p className="text-sm text-slate-500">Loan #{loan.id} · {fmt(loan.principal)} · {loan.flat_rate}% flat · {loan.tenure_months} months</p>
+            <p className="text-sm text-slate-500">Loan #{loan.id} · {fmt(loan.principal)} · {loan.reducing_rate}% reducing balance · {loan.tenure_months} months</p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-xl">✕</button>
         </div>
@@ -615,7 +615,7 @@ function BorrowerPortal({ user, onLogout }) {
                   <tr key={l.id} className="border-t border-slate-50 hover:bg-slate-50/50">
                     <td className="py-3 px-4 text-slate-500 font-medium">#{l.id}</td>
                     <td className="py-3 px-4 text-right font-semibold text-slate-700">{fmt(l.principal)}</td>
-                    <td className="py-3 px-4 text-right text-slate-500">{l.flat_rate}%</td>
+                    <td className="py-3 px-4 text-right text-slate-500">{l.reducing_rate}%</td>
                     <td className="py-3 px-4 text-right text-slate-500">{l.tenure_months}mo</td>
                     <td className="py-3 px-4 text-slate-500">{fmtDate(l.disbursement_date)}</td>
                     <td className="py-3 px-4">{statusBadge(l.status)}</td>
@@ -889,7 +889,7 @@ function AdminUsers() {
                   <tr key={l.id} className="border-t border-slate-50">
                     <td className="py-2 px-3 text-slate-500">#{l.id}</td>
                     <td className="py-2 px-3 text-right font-semibold text-slate-700">{fmt(l.principal)}</td>
-                    <td className="py-2 px-3 text-right text-slate-500">{l.flat_rate}%</td>
+                    <td className="py-2 px-3 text-right text-slate-500">{l.reducing_rate}%</td>
                     <td className="py-2 px-3 text-right text-slate-500">{l.tenure_months}mo</td>
                     <td className="py-2 px-3 text-slate-500">{fmtDate(l.disbursement_date)}</td>
                     <td className="py-2 px-3">{statusBadge(l.status)}</td>
@@ -1034,7 +1034,7 @@ function BorrowerProfile({ borrower, onBack, onDeleted }) {
                 <tr key={l.id} className="border-t border-slate-50 hover:bg-slate-50/50">
                   <td className="py-3 px-4 text-slate-500">#{l.id}</td>
                   <td className="py-3 px-4 text-right font-semibold text-slate-700">{fmt(l.principal)}</td>
-                  <td className="py-3 px-4 text-right text-slate-500">{l.flat_rate}%</td>
+                  <td className="py-3 px-4 text-right text-slate-500">{l.reducing_rate}%</td>
                   <td className="py-3 px-4 text-right text-slate-500">{l.tenure_months}mo</td>
                   <td className="py-3 px-4 text-slate-500">{fmtDate(l.disbursement_date)}</td>
                   <td className="py-3 px-4">{statusBadge(l.status)}</td>
@@ -1138,7 +1138,7 @@ function AdminLoans({ borrowers }) {
   const [showModal, setShowModal] = useState(false);
   const [selectedLoan, setSelectedLoan] = useState(null);
   const [error, setError]       = useState("");
-  const [form, setForm]         = useState({ borrower_id: "", principal: "", flat_rate: "", tenure_months: "", disbursement_date: new Date().toISOString().split("T")[0] });
+  const [form, setForm]         = useState({ borrower_id: "", principal: "", reducing_rate: "", tenure_months: "", disbursement_date: new Date().toISOString().split("T")[0] });
 
   const load = useCallback(() => {
     apiFetch("/loans").then(setLoans).finally(() => setLoading(false));
@@ -1146,11 +1146,11 @@ function AdminLoans({ borrowers }) {
   useEffect(() => { load(); }, [load]);
 
   const submit = async () => {
-    if (!form.borrower_id || !form.principal || !form.flat_rate || !form.tenure_months) { setError("All fields required."); return; }
+    if (!form.borrower_id || !form.principal || !form.reducing_rate || !form.tenure_months) { setError("All fields required."); return; }
     setError("");
-    await apiFetch("/loans", { method: "POST", body: JSON.stringify({ ...form, borrower_id: parseInt(form.borrower_id), principal: parseFloat(form.principal), flat_rate: parseFloat(form.flat_rate), tenure_months: parseInt(form.tenure_months) }) });
+    await apiFetch("/loans", { method: "POST", body: JSON.stringify({ ...form, borrower_id: parseInt(form.borrower_id), principal: parseFloat(form.principal), reducing_rate: parseFloat(form.reducing_rate), tenure_months: parseInt(form.tenure_months) }) });
     setShowModal(false);
-    setForm({ borrower_id: "", principal: "", flat_rate: "", tenure_months: "", disbursement_date: new Date().toISOString().split("T")[0] });
+    setForm({ borrower_id: "", principal: "", reducing_rate: "", tenure_months: "", disbursement_date: new Date().toISOString().split("T")[0] });
     load();
   };
 
@@ -1162,10 +1162,13 @@ function AdminLoans({ borrowers }) {
   };
 
   const preview = (() => {
-    const p = parseFloat(form.principal), r = parseFloat(form.flat_rate), t = parseInt(form.tenure_months);
+    const p = parseFloat(form.principal), r = parseFloat(form.reducing_rate), t = parseInt(form.tenure_months);
     if (!p || !r || !t) return null;
-    const ti = p * (r / 100) * (t / 12);
-    return { ti, total: p + ti, monthly: (p + ti) / t };
+    const monthlyRate = (r / 100) / 12;
+    const monthly = p * (monthlyRate * ((1 + monthlyRate) ** t)) / (((1 + monthlyRate) ** t) - 1);
+    const total = monthly * t;
+    const ti = total - p;
+    return { ti, total, monthly };
   })();
 
   return (
@@ -1193,7 +1196,7 @@ function AdminLoans({ borrowers }) {
                 <tr key={l.id} className="border-t border-slate-50 hover:bg-slate-50/50">
                   <td className="py-3 px-4 font-semibold text-slate-700">{l.borrower_name}</td>
                   <td className="py-3 px-4 text-right text-slate-700">{fmt(l.principal)}</td>
-                  <td className="py-3 px-4 text-right text-slate-500">{l.flat_rate}%</td>
+                  <td className="py-3 px-4 text-right text-slate-500">{l.reducing_rate}%</td>
                   <td className="py-3 px-4 text-right text-slate-500">{l.tenure_months}mo</td>
                   <td className="py-3 px-4 text-slate-500">{fmtDate(l.disbursement_date)}</td>
                   <td className="py-3 px-4">{statusBadge(l.status)}</td>
@@ -1216,7 +1219,7 @@ function AdminLoans({ borrowers }) {
             {borrowers.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </Select>
           <FormInput label="Principal (KES) *" type="number" min="0" value={form.principal} onChange={e => setForm({ ...form, principal: e.target.value })} placeholder="e.g. 50000" />
-          <FormInput label="Annual Flat Rate (%) *" type="number" min="0" step="0.1" value={form.flat_rate} onChange={e => setForm({ ...form, flat_rate: e.target.value })} placeholder="e.g. 12" />
+          <FormInput label="Annual Reducing Balance Rate (%) *" type="number" min="0" step="0.1" value={form.reducing_rate} onChange={e => setForm({ ...form, reducing_rate: e.target.value })} placeholder="e.g. 12" />
           <FormInput label="Tenure (months) *" type="number" min="1" value={form.tenure_months} onChange={e => setForm({ ...form, tenure_months: e.target.value })} placeholder="e.g. 12" />
           <FormInput label="Disbursement Date *" type="date" value={form.disbursement_date} onChange={e => setForm({ ...form, disbursement_date: e.target.value })} />
           {preview && (

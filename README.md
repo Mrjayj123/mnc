@@ -74,9 +74,9 @@ LoanTrack is a single-page React application backed by a Flask REST API and an S
 - Delete a borrower only after all their loans are fully repaid and closed
 
 ### Loan Issuance
-- Issue loans with principal amount, annual flat interest rate, tenure in months, and disbursement date
+- Issue loans with principal amount, annual reducing-balance interest rate, tenure in months, and disbursement date
 - Live preview of total interest, total payable, and monthly installment before confirming
-- Repayment schedule auto-generated on loan creation
+- Repayment schedule auto-generated on loan creation using reducing-balance amortization
 
 ### Repayment Tracking
 - View the full installment schedule for any loan
@@ -368,7 +368,7 @@ All endpoints return JSON. The base URL is `http://localhost:8000` locally.
 {
   "borrower_id": 1,
   "principal": 50000,
-  "flat_rate": 12,
+  "reducing_rate": 12,
   "tenure_months": 12,
   "disbursement_date": "2025-01-01"
 }
@@ -394,23 +394,23 @@ If `paid_date` is omitted, today's date is used.
 
 ## Interest Model
 
-LoanTrack uses a **flat rate** interest model:
+LoanTrack uses a **reducing-balance** interest model:
 
 ```
-Total Interest   = Principal × (Rate / 100) × (Tenure / 12)
-Total Payable    = Principal + Total Interest
-Monthly Install. = Total Payable / Tenure
+Monthly Rate     = Annual Rate / 100 / 12
+EMI              = Principal × [r(1+r)^n] / [(1+r)^n - 1]
+Interest Portion = Remaining Balance × Monthly Rate
+Principal Portion= EMI - Interest Portion
 ```
 
-**Example:** KES 50,000 loan at 12% flat rate over 12 months
+**Example:** KES 50,000 loan at 12% reducing balance over 12 months
 
 ```
-Total Interest   = 50,000 × 0.12 × (12/12) = KES 6,000
-Total Payable    = 50,000 + 6,000           = KES 56,000
-Monthly Install. = 56,000 / 12              = KES 4,666.67
+Monthly Rate     = 0.12 / 12 = 0.01
+EMI              = 50,000 × [0.01(1.01)^12] / [(1.01)^12 - 1] ≈ KES 4,420.25
 ```
 
-The last installment is adjusted to absorb any rounding difference across the schedule.
+The schedule is amortized each month on the remaining balance, and the final installment is adjusted to absorb any rounding difference.
 
 ---
 
@@ -436,7 +436,7 @@ SQLite database file: `backend/loans.db` (auto-created on first run).
 | id | INTEGER PK | Auto-incremented |
 | borrower_id | INTEGER FK | References `borrowers.id` |
 | principal | REAL | Loan amount |
-| flat_rate | REAL | Annual flat interest rate (%) |
+| reducing_rate | REAL | Annual reducing-balance interest rate (%) |
 | tenure_months | INTEGER | Loan duration in months |
 | disbursement_date | TEXT | ISO date (YYYY-MM-DD) |
 | status | TEXT | `active` or `closed` |
@@ -625,7 +625,7 @@ Future improvements planned for this project:
 - [ ] PDF statement generation per borrower or per loan
 - [ ] SMS/email payment reminders for overdue installments
 - [ ] Role-based access control (admin vs. read-only officer)
-- [ ] Reducing balance interest model as an alternative to flat rate
+- [x] Reducing-balance interest model for all loans
 - [ ] Loan restructuring (extend tenure or adjust rate on existing loans)
 - [ ] Export to Excel — full portfolio or per-borrower history
 

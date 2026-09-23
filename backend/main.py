@@ -13,15 +13,11 @@ load_dotenv()
 # ── Africa's Talking SMS SDK ──────────────────────────────────────────────────
 try:
     import africastalking
-    AT_USERNAME = os.environ.get("AT_USERNAME")
-    AT_API_KEY  = os.environ.get("AT_API_KEY")
-    if AT_USERNAME and AT_API_KEY:
-        africastalking.initialize(AT_USERNAME, AT_API_KEY)
-        sms = africastalking.SMS
-        AT_ENABLED = True
-    else:
-        AT_ENABLED = False
-        sms = None
+    AT_USERNAME = os.environ.get("AT_USERNAME", "sandbox")
+    AT_API_KEY  = os.environ.get("AT_API_KEY",  "007415aba2a81be22631ee1aa3182845e60ef555374d23c62be005afaa68c3b1eea1465a")
+    africastalking.initialize(AT_USERNAME, AT_API_KEY)
+    sms = africastalking.SMS
+    AT_ENABLED = True
 except ImportError:
     AT_ENABLED = False
     sms = None
@@ -35,8 +31,8 @@ DB_PATH = os.environ.get(
 )
 
 # Admin credentials (change before deploying) ───────────────────────────────
-ADMIN_ID_NUMBER = os.environ.get("ADMIN_ID_NUMBER")
-ADMIN_PASSWORD  = os.environ.get("ADMIN_PASSWORD")
+ADMIN_ID_NUMBER = os.environ.get("ADMIN_ID_NUMBER", "22238204")
+ADMIN_PASSWORD  = os.environ.get("ADMIN_PASSWORD",  "@Crownsandroses1")
 ADMIN_NAME      = "Admin"
 
 # ─── DB INIT ──────────────────────────────────────────────────────────────────
@@ -77,7 +73,7 @@ def init_db():
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
             borrower_id       INTEGER NOT NULL,
             principal         REAL NOT NULL,
-            flat_rate         REAL NOT NULL,
+            reducing_rate         REAL NOT NULL,
             tenure_months     INTEGER NOT NULL,
             disbursement_date TEXT NOT NULL,
             status            TEXT DEFAULT 'active',
@@ -471,28 +467,93 @@ def delete_borrower(bid):
 
 # ─── LOANS ────────────────────────────────────────────────────────────────────
 
-def generate_installments(loan_id, principal, flat_rate, tenure_months, disbursement_date):
-    total_interest = principal * (flat_rate / 100) * (tenure_months / 12)
-    total_payable  = principal + total_interest
-    monthly        = round(total_payable / tenure_months, 2)
-    m_interest     = round(total_interest / tenure_months, 2)
-    m_principal    = round(principal / tenure_months, 2)
-    start          = date.fromisoformat(disbursement_date)
+def calculate_monthly_payment(principal, annual_rate, tenure_months):
+    """Return the monthly EMI using the reducing-balance amortization formula."""
+    principal = float(principal)
+    annual_rate = float(annual_rate)
+    tenure_months = int(tenure_months)
+
+    if tenure_months <= 0:
+        raise ValueError("tenure_months must be greater than 0")
+
+    r = (annual_rate / 100) / 12
+    if r > 0:
+        return round(
+            principal * (r * ((1 + r) ** tenure_months)) / (((1 + r) ** tenure_months) - 1),
+            2,
+        )
+    return round(principal / tenure_months, 2)
+
+
+def generate_installments(loan_id, principal, annual_rate, tenure_months, disbursement_date):
+    """
+    Generates loan installments using the Reducing Balance (Amortization) method.
+    `annual_rate` is expected as a percentage (e.g., 18.0 for 18% APR).
+    """
+    principal = float(principal)
+    annual_rate = float(annual_rate)
+    tenure_months = int(tenure_months)
+
+    # Calculate monthly reducing interest rate (r)
+    r = (annual_rate / 100) / 12
+    monthly_payment = calculate_monthly_payment(principal, annual_rate, tenure_months)
+
+    start = date.fromisoformat(disbursement_date)
+    remaining_balance = principal
+
     conn = get_db()
-    c    = conn.cursor()
+    c = conn.cursor()
+    c.execute("DELETE FROM installments WHERE loan_id = ?", (loan_id,))
+
     for i in range(1, tenure_months + 1):
         due = start + relativedelta(months=i)
-        amt = monthly if i < tenure_months else round(total_payable - monthly * (tenure_months - 1), 2)
+
+        # Calculate monthly interest based on remaining balance
+        interest_portion = round(remaining_balance * r, 2)
+
+        if i < tenure_months:
+            principal_portion = round(monthly_payment - interest_portion, 2)
+            amt = monthly_payment
+            remaining_balance -= principal_portion
+        else:
+            # Final installment adjusts for rounding discrepancies
+            principal_portion = round(remaining_balance, 2)
+            amt = round(principal_portion + interest_portion, 2)
+            remaining_balance = 0.0
+
         c.execute(
-            "INSERT INTO installments (loan_id,installment_no,due_date,amount,principal_portion,interest_portion) VALUES (?,?,?,?,?,?)",
-            (loan_id, i, due.isoformat(), amt, m_principal, m_interest)
+            """INSERT INTO installments 
+               (loan_id, installment_no, due_date, amount, principal_portion, interest_portion) 
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (loan_id, i, due.isoformat(), amt, principal_portion, interest_portion)
         )
+
     conn.commit()
     conn.close()
 
 def flag_overdue(c):
     c.execute("UPDATE installments SET status='overdue' WHERE status='pending' AND due_date < ?",
               (date.today().isoformat(),))
+
+
+def recalculate_all_loan_installments():
+    """Rebuild all schedules using the reducing-balance method so older records are corrected."""
+    conn = get_db()
+    c = conn.cursor()
+    rows = c.execute("SELECT id, principal, reducing_rate, tenure_months, disbursement_date FROM loans").fetchall()
+    for row in rows:
+        generate_installments(
+            row["id"],
+            row["principal"],
+            row["reducing_rate"],
+            row["tenure_months"],
+            row["disbursement_date"],
+        )
+    conn.close()
+
+
+recalculate_all_loan_installments()
+
 
 @app.route("/loans", methods=["GET"])
 def list_loans():
@@ -525,7 +586,7 @@ def loans_by_borrower(borrower_id):
 @app.route("/loans", methods=["POST"])
 def create_loan():
     data = request.get_json()
-    if not data or not all(k in data for k in ["borrower_id","principal","flat_rate","tenure_months","disbursement_date"]):
+    if not data or not all(k in data for k in ["borrower_id","principal","reducing_rate","tenure_months","disbursement_date"]):
         return jsonify({"detail": "Missing required fields"}), 400
 
     conn     = get_db()
@@ -535,22 +596,23 @@ def create_loan():
         conn.close()
         return jsonify({"detail": "Borrower not found"}), 404
 
-    c.execute("INSERT INTO loans (borrower_id,principal,flat_rate,tenure_months,disbursement_date) VALUES (?,?,?,?,?)",
-              (data["borrower_id"], data["principal"], data["flat_rate"],
+    c.execute("INSERT INTO loans (borrower_id,principal,reducing_rate,tenure_months,disbursement_date) VALUES (?,?,?,?,?)",
+              (data["borrower_id"], data["principal"], data["reducing_rate"],
                data["tenure_months"], data["disbursement_date"]))
     conn.commit()
     loan_id = c.lastrowid
     conn.close()
 
-    generate_installments(loan_id, data["principal"], data["flat_rate"],
+    generate_installments(loan_id, data["principal"], data["reducing_rate"],
                           data["tenure_months"], data["disbursement_date"])
 
     # Loan disbursement SMS
     if borrower["phone"]:
-        ti      = data["principal"] * (data["flat_rate"] / 100) * (data["tenure_months"] / 12)
-        monthly = round((data["principal"] + ti) / data["tenure_months"], 2)
+        monthly = calculate_monthly_payment(
+            data["principal"], data["reducing_rate"], data["tenure_months"]
+        )
         send_sms(borrower["phone"],
-            f"Dear {borrower['name']}, your loan of KES {data['principal']:,.2f} at {data['flat_rate']}% "
+            f"Dear {borrower['name']}, your loan of KES {data['principal']:,.2f} at {data['reducing_rate']}% "
             f"has been approved. Monthly installment: KES {monthly:,.2f} x {data['tenure_months']} months. - MnC Finance",
             borrower["id"], loan_id
         )
