@@ -1164,11 +1164,22 @@ function AdminLoans({ borrowers }) {
   const preview = (() => {
     const p = parseFloat(form.principal), r = parseFloat(form.reducing_rate), t = parseInt(form.tenure_months);
     if (!p || !r || !t) return null;
-    const monthlyRate = (r / 100) / 12;
-    const monthly = p * (monthlyRate * ((1 + monthlyRate) ** t)) / (((1 + monthlyRate) ** t) - 1);
-    const total = monthly * t;
-    const ti = total - p;
-    return { ti, total, monthly };
+
+    const principalShare = p / t;
+    let balance = p;
+    let totalInterest = 0;
+    let firstPayment = 0;
+
+    for (let month = 1; month <= t; month++) {
+      const interest = balance * (r / 100);
+      const payment = principalShare + interest;
+      if (month === 1) firstPayment = payment;
+      totalInterest += interest;
+      balance -= principalShare;
+    }
+
+    const total = p + totalInterest;
+    return { ti: totalInterest, total, monthly: firstPayment };
   })();
 
   return (
@@ -1219,15 +1230,16 @@ function AdminLoans({ borrowers }) {
             {borrowers.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </Select>
           <FormInput label="Principal (KES) *" type="number" min="0" value={form.principal} onChange={e => setForm({ ...form, principal: e.target.value })} placeholder="e.g. 50000" />
-          <FormInput label="Annual Reducing Balance Rate (%) *" type="number" min="0" step="0.1" value={form.reducing_rate} onChange={e => setForm({ ...form, reducing_rate: e.target.value })} placeholder="e.g. 12" />
-          <FormInput label="Tenure (months) *" type="number" min="1" value={form.tenure_months} onChange={e => setForm({ ...form, tenure_months: e.target.value })} placeholder="e.g. 12" />
+          <FormInput label="Reducing Balance Rate (%) *" type="number" min="0" step="0.1" value={form.reducing_rate} onChange={e => setForm({ ...form, reducing_rate: e.target.value })} placeholder="e.g. 10" />
+          <FormInput label="Tenure (months) *" type="number" min="1" value={form.tenure_months} onChange={e => setForm({ ...form, tenure_months: e.target.value })} placeholder="e.g. 4" />
           <FormInput label="Disbursement Date *" type="date" value={form.disbursement_date} onChange={e => setForm({ ...form, disbursement_date: e.target.value })} />
           {preview && (
             <div className="bg-blue-50 rounded-xl p-4 mb-4 text-sm">
               <p className="font-semibold text-blue-700 mb-2">Loan Preview</p>
+              <div className="flex justify-between text-slate-600 mb-1"><span>Principal Share / Month</span><span className="font-medium">{fmt((parseFloat(form.principal) / parseInt(form.tenure_months)))}</span></div>
               <div className="flex justify-between text-slate-600 mb-1"><span>Total Interest</span><span className="font-medium">{fmt(preview.ti)}</span></div>
               <div className="flex justify-between text-slate-600 mb-1"><span>Total Payable</span><span className="font-medium">{fmt(preview.total)}</span></div>
-              <div className="flex justify-between text-blue-700 font-semibold border-t border-blue-100 pt-1"><span>Monthly Installment</span><span>{fmt(preview.monthly)}</span></div>
+              <div className="flex justify-between text-blue-700 font-semibold border-t border-blue-100 pt-1"><span>First Repayment</span><span>{fmt(preview.monthly)}</span></div>
             </div>
           )}
           <div className="flex gap-3 pt-1">

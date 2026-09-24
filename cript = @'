@@ -1,0 +1,26 @@
+[1mdiff --git a/backend/main.py b/backend/main.py[m
+[1mindex 90188a9..ea48551 100644[m
+[1m--- a/backend/main.py[m
+[1m+++ b/backend/main.py[m
+[36m@@ -104,6 +104,11 @@[m [mdef init_db():[m
+             loan_id     INTEGER[m
+         );[m
+     """)[m
+[32m+[m
+[32m+[m[32m    loan_columns = {row[1] for row in c.execute("PRAGMA table_info(loans)").fetchall()}[m
+[32m+[m[32m    if "flat_rate" in loan_columns and "reducing_rate" not in loan_columns:[m
+[32m+[m[32m        c.execute("ALTER TABLE loans RENAME COLUMN flat_rate TO reducing_rate")[m
+[32m+[m
+     conn.commit()[m
+     conn.close()[m
+ [m
+[36m@@ -552,9 +557,6 @@[m [mdef recalculate_all_loan_installments():[m
+     conn.close()[m
+ [m
+ [m
+[31m-recalculate_all_loan_installments()[m
+[31m-[m
+[31m-[m
+ @app.route("/loans", methods=["GET"])[m
+ def list_loans():[m
+     conn = get_db()[m

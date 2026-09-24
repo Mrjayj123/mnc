@@ -104,6 +104,11 @@ def init_db():
             loan_id     INTEGER
         );
     """)
+
+    loan_columns = {row[1] for row in c.execute("PRAGMA table_info(loans)").fetchall()}
+    if "flat_rate" in loan_columns and "reducing_rate" not in loan_columns:
+        c.execute("ALTER TABLE loans RENAME COLUMN flat_rate TO reducing_rate")
+
     conn.commit()
     conn.close()
 
@@ -467,69 +472,107 @@ def delete_borrower(bid):
 
 # ─── LOANS ────────────────────────────────────────────────────────────────────
 
-def calculate_monthly_payment(principal, annual_rate, tenure_months):
-    """Return the monthly EMI using the reducing-balance amortization formula."""
+
+def calculate_monthly_payment(principal, rate_percent, tenure_months):
+    """Compute the first repayment using the fixed-principal + reducing-balance formula.
+
+    The business rule is:
+      fixed principal share = principal / tenure_months
+      interest for the month = remaining balance * rate_percent / 100
+      total payment = fixed principal share + interest
+    """
     principal = float(principal)
-    annual_rate = float(annual_rate)
+    rate_percent = float(rate_percent)
+    tenure_months = max(int(tenure_months), 1)
+
+    principal_share = principal / tenure_months
+    balance = principal
+    interest = balance * (rate_percent / 100.0)
+    return round(principal_share + interest, 2)
+
+
+def build_custom_schedule(principal, rate_percent, tenure_months):
+    """Return the amortization schedule for the custom reducing-balance formula."""
+    principal = float(principal)
+    rate_percent = float(rate_percent)
     tenure_months = int(tenure_months)
+    if principal <= 0 or tenure_months <= 0:
+        return []
 
-    if tenure_months <= 0:
-        raise ValueError("tenure_months must be greater than 0")
+    principal_share = principal / tenure_months
+    balance = principal
+    schedule = []
 
-    r = (annual_rate / 100) / 12
-    if r > 0:
-        return round(
-            principal * (r * ((1 + r) ** tenure_months)) / (((1 + r) ** tenure_months) - 1),
-            2,
-        )
-    return round(principal / tenure_months, 2)
+    for month in range(1, tenure_months + 1):
+        interest = round(balance * (rate_percent / 100.0), 2)
+        amount = round(principal_share + interest, 2)
+        schedule.append({
+            "month": month,
+            "principal_portion": round(principal_share, 2),
+            "interest_portion": interest,
+            "amount": amount,
+            "remaining_balance": round(balance - principal_share, 2),
+        })
+        balance = round(balance - principal_share, 2)
+
+    return schedule
 
 
 def generate_installments(loan_id, principal, annual_rate, tenure_months, disbursement_date):
-    """
-    Generates loan installments using the Reducing Balance (Amortization) method.
-    `annual_rate` is expected as a percentage (e.g., 18.0 for 18% APR).
+    """Generate the loan repayment schedule using the client's reducing-balance formula.
+
+    Formula used for each month:
+      principal_share = principal / tenure_months
+      interest = remaining_balance * (rate / 100)
+      payment = principal_share + interest
     """
     principal = float(principal)
-    annual_rate = float(annual_rate)
     tenure_months = int(tenure_months)
-
-    # Calculate monthly reducing interest rate (r)
-    r = (annual_rate / 100) / 12
-    monthly_payment = calculate_monthly_payment(principal, annual_rate, tenure_months)
+    if principal <= 0 or tenure_months <= 0:
+        return []
 
     start = date.fromisoformat(disbursement_date)
-    remaining_balance = principal
-
     conn = get_db()
     c = conn.cursor()
     c.execute("DELETE FROM installments WHERE loan_id = ?", (loan_id,))
 
-    for i in range(1, tenure_months + 1):
-        due = start + relativedelta(months=i)
-
-        # Calculate monthly interest based on remaining balance
-        interest_portion = round(remaining_balance * r, 2)
-
-        if i < tenure_months:
-            principal_portion = round(monthly_payment - interest_portion, 2)
-            amt = monthly_payment
-            remaining_balance -= principal_portion
-        else:
-            # Final installment adjusts for rounding discrepancies
-            principal_portion = round(remaining_balance, 2)
-            amt = round(principal_portion + interest_portion, 2)
-            remaining_balance = 0.0
-
+    schedule = build_custom_schedule(principal, annual_rate, tenure_months)
+    for item in schedule:
+        due = start + relativedelta(months=item["month"])
         c.execute(
-            """INSERT INTO installments 
-               (loan_id, installment_no, due_date, amount, principal_portion, interest_portion) 
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (loan_id, i, due.isoformat(), amt, principal_portion, interest_portion)
+            """INSERT INTO installments
+               (loan_id, installment_no, due_date, amount, principal_portion, interest_portion, status)
+               VALUES (?, ?, ?, ?, ?, ?, 'pending')""",
+            (
+                loan_id,
+                item["month"],
+                due.isoformat(),
+                item["amount"],
+                item["principal_portion"],
+                item["interest_portion"],
+            ),
         )
 
     conn.commit()
     conn.close()
+    return schedule
+
+
+def generate_installments_declining_principal(loan_id, principal, monthly_rate_pct, tenure_months, disbursement_date):
+    """Backward-compatible wrapper for older fixed-principal logic.
+
+    The legacy caller supplies a monthly percentage, while the current loan
+    schedule expects the configured per-period percentage directly.
+    """
+    monthly_rate_pct = float(monthly_rate_pct)
+    return generate_installments(
+        loan_id,
+        principal,
+        monthly_rate_pct,
+        tenure_months,
+        disbursement_date,
+    )
+
 
 def flag_overdue(c):
     c.execute("UPDATE installments SET status='overdue' WHERE status='pending' AND due_date < ?",
@@ -542,17 +585,45 @@ def recalculate_all_loan_installments():
     c = conn.cursor()
     rows = c.execute("SELECT id, principal, reducing_rate, tenure_months, disbursement_date FROM loans").fetchall()
     for row in rows:
-        generate_installments(
-            row["id"],
+        existing = c.execute(
+            "SELECT installment_no, status, paid_date FROM installments WHERE loan_id=?",
+            (row["id"],),
+        ).fetchall()
+        paid_by_number = {
+            item["installment_no"]: (item["status"], item["paid_date"])
+            for item in existing
+            if item["status"] == "paid"
+        }
+        c.execute("DELETE FROM installments WHERE loan_id=?", (row["id"],))
+
+        start = date.fromisoformat(row["disbursement_date"])
+        schedule = build_custom_schedule(
             row["principal"],
             row["reducing_rate"],
             row["tenure_months"],
-            row["disbursement_date"],
         )
+        for item in schedule:
+            installment_no = item["month"]
+            status, paid_date = paid_by_number.get(installment_no, ("pending", None))
+            due = start + relativedelta(months=installment_no)
+            c.execute(
+                """INSERT INTO installments
+                   (loan_id, installment_no, due_date, amount, principal_portion,
+                    interest_portion, paid_date, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    row["id"],
+                    installment_no,
+                    due.isoformat(),
+                    item["amount"],
+                    item["principal_portion"],
+                    item["interest_portion"],
+                    paid_date,
+                    status,
+                ),
+            )
+    conn.commit()
     conn.close()
-
-
-recalculate_all_loan_installments()
 
 
 @app.route("/loans", methods=["GET"])
@@ -608,12 +679,12 @@ def create_loan():
 
     # Loan disbursement SMS
     if borrower["phone"]:
-        monthly = calculate_monthly_payment(
+        first_payment = calculate_monthly_payment(
             data["principal"], data["reducing_rate"], data["tenure_months"]
         )
         send_sms(borrower["phone"],
             f"Dear {borrower['name']}, your loan of KES {data['principal']:,.2f} at {data['reducing_rate']}% "
-            f"has been approved. Monthly installment: KES {monthly:,.2f} x {data['tenure_months']} months. - MnC Finance",
+            f"has been approved. First repayment: KES {first_payment:,.2f} with the remaining schedule generated on reducing balance. - MnC Finance",
             borrower["id"], loan_id
         )
 
