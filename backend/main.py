@@ -5,30 +5,42 @@ import hashlib
 import secrets
 import re
 import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
 load_dotenv()
 
 # ── Africa's Talking SMS SDK ──────────────────────────────────────────────────
+import os
+
 try:
     import africastalking
+    
+    # Retrieve credentials strictly from environment variables
     AT_USERNAME = os.environ.get("AT_USERNAME", "sandbox")
-    AT_API_KEY  = os.environ.get("AT_API_KEY",  "007415aba2a81be22631ee1aa3182845e60ef555374d23c62be005afaa68c3b1eea1465a")
-    africastalking.initialize(AT_USERNAME, AT_API_KEY)
-    sms = africastalking.SMS
-    AT_ENABLED = True
+    AT_API_KEY = os.environ.get("AT_API_KEY", "")
+
+    if AT_USERNAME and AT_API_KEY:
+        africastalking.initialize(AT_USERNAME, AT_API_KEY)
+        sms = africastalking.SMS
+        AT_ENABLED = True
+    else:
+        AT_ENABLED = False
+        sms = None
+        print("Africa's Talking SDK: Missing AT_USERNAME or AT_API_KEY environment variables.")
+
 except ImportError:
     AT_ENABLED = False
     sms = None
+    print("Africa's Talking SDK not installed. Run: pip install africastalking")
 
 app = Flask(__name__)
-CORS(app)
+CORS(app,origins=["https://loan-tracker-roan.vercel.app", "http://localhost:5173"])
 
-DB_PATH = os.environ.get(
-    "DB_PATH",
-    os.path.join(os.path.dirname(__file__), "loans.db")
-)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+DB_PATH = os.path.join(os.path.dirname(__file__), "loans.db")
 
 # Admin credentials (change before deploying) ───────────────────────────────
 ADMIN_ID_NUMBER = os.environ.get("ADMIN_ID_NUMBER", "22238204")
@@ -37,17 +49,35 @@ ADMIN_NAME      = "Admin"
 
 # ─── DB INIT ──────────────────────────────────────────────────────────────────
 
+class PostgresCursor(RealDictCursor):
+    def execute(self, query, vars=None):
+        return super().execute(query.replace("?", "%s"), vars)
+
+
 def get_db():
+    if DATABASE_URL:
+        return psycopg2.connect(DATABASE_URL, cursor_factory=PostgresCursor)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
+
+def insert_and_get_id(cursor, sql, params):
+    if DATABASE_URL:
+        cursor.execute(f"{sql} RETURNING id", params)
+        return cursor.fetchone()["id"]
+    cursor.execute(sql, params)
+    return cursor.lastrowid
+
+
 def init_db():
     conn = get_db()
     c = conn.cursor()
-    c.executescript("""
+    id_definition = "SERIAL PRIMARY KEY" if DATABASE_URL else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    timestamp_definition = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP" if DATABASE_URL else "TEXT DEFAULT (datetime('now'))"
+    schema = f"""
         CREATE TABLE IF NOT EXISTS users (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            id            {id_definition},
             name          TEXT NOT NULL,
             email         TEXT NOT NULL UNIQUE,
             phone         TEXT NOT NULL,
@@ -55,34 +85,34 @@ def init_db():
             password_hash TEXT NOT NULL,
             salt          TEXT NOT NULL,
             role          TEXT DEFAULT 'borrower',
-            created_at    TEXT DEFAULT (datetime('now'))
+            created_at    {timestamp_definition}
         );
 
         CREATE TABLE IF NOT EXISTS borrowers (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            id         {id_definition},
             user_id    INTEGER UNIQUE,
             name       TEXT NOT NULL,
             email      TEXT,
             phone      TEXT,
             id_number  TEXT,
-            created_at TEXT DEFAULT (datetime('now')),
+            created_at {timestamp_definition},
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
 
         CREATE TABLE IF NOT EXISTS loans (
-            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            id                {id_definition},
             borrower_id       INTEGER NOT NULL,
             principal         REAL NOT NULL,
             reducing_rate         REAL NOT NULL,
             tenure_months     INTEGER NOT NULL,
             disbursement_date TEXT NOT NULL,
             status            TEXT DEFAULT 'active',
-            created_at        TEXT DEFAULT (datetime('now')),
+            created_at        {timestamp_definition},
             FOREIGN KEY (borrower_id) REFERENCES borrowers(id)
         );
 
         CREATE TABLE IF NOT EXISTS installments (
-            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            id                {id_definition},
             loan_id           INTEGER NOT NULL,
             installment_no    INTEGER NOT NULL,
             due_date          TEXT NOT NULL,
@@ -95,17 +125,28 @@ def init_db():
         );
 
         CREATE TABLE IF NOT EXISTS sms_log (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            id          {id_definition},
             phone       TEXT NOT NULL,
             message     TEXT NOT NULL,
             status      TEXT DEFAULT 'sent',
-            sent_at     TEXT DEFAULT (datetime('now')),
+            sent_at     {timestamp_definition},
             borrower_id INTEGER,
             loan_id     INTEGER
         );
-    """)
+    """
+    for statement in schema.split(";"):
+        if statement.strip():
+            c.execute(statement)
 
-    loan_columns = {row[1] for row in c.execute("PRAGMA table_info(loans)").fetchall()}
+    if DATABASE_URL:
+        c.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = ?",
+            ("loans",),
+        )
+        loan_columns = {row["column_name"] for row in c.fetchall()}
+    else:
+        loan_columns = {row[1] for row in c.execute("PRAGMA table_info(loans)").fetchall()}
     if "flat_rate" in loan_columns and "reducing_rate" not in loan_columns:
         c.execute("ALTER TABLE loans RENAME COLUMN flat_rate TO reducing_rate")
 
@@ -224,12 +265,12 @@ def register():
         conn.close()
         return jsonify({"detail": "An account with this ID number already exists."}), 409
 
-    c.execute(
+    user_id = insert_and_get_id(
+        c,
         "INSERT INTO users (name, email, phone, id_number, password_hash, salt, role) VALUES (?,?,?,?,?,?,'borrower')",
         (name, email, phone, id_number, password_hash, salt)
     )
     conn.commit()
-    user_id = c.lastrowid
 
     c.execute(
         "INSERT INTO borrowers (user_id, name, email, phone, id_number) VALUES (?,?,?,?,?)",
@@ -413,7 +454,7 @@ def list_users():
 @app.route("/borrowers", methods=["GET"])
 def list_borrowers():
     conn = get_db()
-    rows = conn.execute("SELECT * FROM borrowers ORDER BY created_at DESC").fetchall()
+    rows = conn.cursor().execute("SELECT * FROM borrowers ORDER BY created_at DESC").fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -424,24 +465,27 @@ def create_borrower():
         return jsonify({"detail": "Name is required"}), 400
     conn = get_db()
     c    = conn.cursor()
-    c.execute("INSERT INTO borrowers (name, email, phone, id_number) VALUES (?,?,?,?)",
-              (data["name"], data.get("email"), data.get("phone"), data.get("id_number")))
+    borrower_id = insert_and_get_id(
+        c,
+        "INSERT INTO borrowers (name, email, phone, id_number) VALUES (?,?,?,?)",
+        (data["name"], data.get("email"), data.get("phone"), data.get("id_number")),
+    )
     conn.commit()
-    row = c.execute("SELECT * FROM borrowers WHERE id=?", (c.lastrowid,)).fetchone()
+    row = c.execute("SELECT * FROM borrowers WHERE id=?", (borrower_id,)).fetchone()
     conn.close()
     return jsonify(dict(row)), 201
 
 @app.route("/borrowers/<int:bid>", methods=["GET"])
 def get_borrower(bid):
     conn = get_db()
-    row  = conn.execute("SELECT * FROM borrowers WHERE id=?", (bid,)).fetchone()
+    row  = conn.cursor().execute("SELECT * FROM borrowers WHERE id=?", (bid,)).fetchone()
     conn.close()
     return jsonify(dict(row)) if row else (jsonify({"detail":"Not found"}), 404)
 
 @app.route("/borrowers/by-user/<int:user_id>", methods=["GET"])
 def get_borrower_by_user(user_id):
     conn = get_db()
-    row  = conn.execute("SELECT * FROM borrowers WHERE user_id=?", (user_id,)).fetchone()
+    row  = conn.cursor().execute("SELECT * FROM borrowers WHERE user_id=?", (user_id,)).fetchone()
     conn.close()
     return jsonify(dict(row)) if row else (jsonify({"detail":"Not found"}), 404)
 
@@ -518,7 +562,7 @@ def build_custom_schedule(principal, rate_percent, tenure_months):
     return schedule
 
 
-def generate_installments(loan_id, principal, annual_rate, tenure_months, disbursement_date):
+def generate_installments(loan_id, principal, rate_percent, tenure_months, disbursement_date):
     """Generate the loan repayment schedule using the client's reducing-balance formula.
 
     Formula used for each month:
@@ -536,7 +580,7 @@ def generate_installments(loan_id, principal, annual_rate, tenure_months, disbur
     c = conn.cursor()
     c.execute("DELETE FROM installments WHERE loan_id = ?", (loan_id,))
 
-    schedule = build_custom_schedule(principal, annual_rate, tenure_months)
+    schedule = build_custom_schedule(principal, rate_percent, tenure_months)
     for item in schedule:
         due = start + relativedelta(months=item["month"])
         c.execute(
@@ -667,15 +711,22 @@ def create_loan():
         conn.close()
         return jsonify({"detail": "Borrower not found"}), 404
 
-    c.execute("INSERT INTO loans (borrower_id,principal,reducing_rate,tenure_months,disbursement_date) VALUES (?,?,?,?,?)",
-              (data["borrower_id"], data["principal"], data["reducing_rate"],
-               data["tenure_months"], data["disbursement_date"]))
+    loan_id = insert_and_get_id(
+        c,
+        "INSERT INTO loans (borrower_id,principal,reducing_rate,tenure_months,disbursement_date) VALUES (?,?,?,?,?)",
+        (data["borrower_id"], data["principal"], data["reducing_rate"],
+         data["tenure_months"], data["disbursement_date"]),
+    )
     conn.commit()
-    loan_id = c.lastrowid
     conn.close()
 
-    generate_installments(loan_id, data["principal"], data["reducing_rate"],
-                          data["tenure_months"], data["disbursement_date"])
+    generate_installments(
+        loan_id,
+        data["principal"],
+        data["reducing_rate"],
+        data["tenure_months"],
+        data["disbursement_date"],
+    )
 
     # Loan disbursement SMS
     if borrower["phone"]:
@@ -799,7 +850,7 @@ def dashboard():
     arrears_amount  = q("SELECT COALESCE(SUM(amount),0) as s FROM installments WHERE status='overdue'")["s"]
     total_borrowers = q("SELECT COUNT(*) as n FROM borrowers")["n"]
     total_users     = q("SELECT COUNT(*) as n FROM users")["n"]
-    sms_sent_today  = q("SELECT COUNT(*) as n FROM sms_log WHERE sent_at >= date('now')")["n"]
+    sms_sent_today  = q("SELECT COUNT(*) as n FROM sms_log WHERE sent_at >= CURRENT_DATE")["n"]
 
     recent_loans = c.execute("""
         SELECT l.id, l.principal, l.status, l.disbursement_date, b.name as borrower_name
@@ -827,6 +878,9 @@ def dashboard():
         "recent_loans": [dict(r) for r in recent_loans],
         "overdue_loans": [dict(r) for r in overdue_loans],
     })
+
+
+recalculate_all_loan_installments()
 
 if __name__ == "__main__":
     app.run(
