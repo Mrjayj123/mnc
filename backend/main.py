@@ -51,7 +51,8 @@ ADMIN_NAME      = "Admin"
 
 class PostgresCursor(RealDictCursor):
     def execute(self, query, vars=None):
-        return super().execute(query.replace("?", "%s"), vars)
+        super().execute(query.replace("?", "%s"), vars)
+        return self
 
 
 def get_db():
@@ -879,12 +880,6 @@ def dashboard():
         "overdue_loans": [dict(r) for r in overdue_loans],
     })
 
-
-recalculate_all_loan_installments()
-
 if __name__ == "__main__":
-    app.run(
-        debug=os.environ.get("FLASK_DEBUG", "0") == "1",
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", "8000")),
-    )
+    recalculate_all_loan_installments()
+    app.run()
