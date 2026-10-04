@@ -37,7 +37,14 @@ except ImportError:
     print("Africa's Talking SDK not installed. Run: pip install africastalking")
 
 app = Flask(__name__)
-CORS(app,origins=["https://loan-tracker-roan.vercel.app", "http://localhost:5173"])
+allowed_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.environ.get(
+        "FRONTEND_URL", "https://loan-tracker-roan.vercel.app"
+    ).split(",")
+    if origin.strip()
+]
+CORS(app, origins=allowed_origins + ["http://localhost:5173"])
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DB_PATH = os.path.join(os.path.dirname(__file__), "loans.db")
