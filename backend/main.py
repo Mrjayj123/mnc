@@ -873,7 +873,7 @@ def dashboard():
         JOIN loans l ON i.loan_id=l.id
         JOIN borrowers b ON l.borrower_id=b.id
         WHERE i.status='overdue'
-        GROUP BY l.id ORDER BY overdue_amount DESC LIMIT 5
+        GROUP BY l.id, b.name ORDER BY overdue_amount DESC LIMIT 5
     """).fetchall()
 
     conn.close()
