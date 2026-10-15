@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import sqlite3
 import hashlib
 import secrets
 import re
@@ -10,15 +9,13 @@ from psycopg2.extras import RealDictCursor
 from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # ── Africa's Talking SMS SDK ──────────────────────────────────────────────────
-import os
-
 try:
     import africastalking
     
-    # Retrieve credentials strictly from environment variables
     AT_USERNAME = os.environ.get("AT_USERNAME", "sandbox")
     AT_API_KEY = os.environ.get("AT_API_KEY", "")
 
@@ -37,6 +34,7 @@ except ImportError:
     print("Africa's Talking SDK not installed. Run: pip install africastalking")
 
 app = Flask(__name__)
+
 allowed_origins = [
     origin.strip().rstrip("/")
     for origin in os.environ.get(
@@ -44,123 +42,138 @@ allowed_origins = [
     ).split(",")
     if origin.strip()
 ]
-CORS(app, origins=allowed_origins + ["http://localhost:5173"])
+CORS(app, origins=allowed_origins + ["http://localhost:5173", "http://localhost:3000"])
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
-DB_PATH = os.path.join(os.path.dirname(__file__), "loans.db")
 
-# Admin credentials (change before deploying) ───────────────────────────────
+# Admin credentials
 ADMIN_ID_NUMBER = os.environ.get("ADMIN_ID_NUMBER", "22238204")
 ADMIN_PASSWORD  = os.environ.get("ADMIN_PASSWORD",  "@Crownsandroses1")
 ADMIN_NAME      = "Admin"
 
-# ─── DB INIT ──────────────────────────────────────────────────────────────────
+# ─── DB CONNECTION & INIT ─────────────────────────────────────────────────────
 
 class PostgresCursor(RealDictCursor):
     def execute(self, query, vars=None):
-        super().execute(query.replace("?", "%s"), vars)
+        if vars is None:
+            super().execute(query.replace("?", "%s"))
+        else:
+            super().execute(query.replace("?", "%s"), vars)
         return self
 
 
 def get_db():
-    if DATABASE_URL:
-        return psycopg2.connect(DATABASE_URL, cursor_factory=PostgresCursor)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    if not DATABASE_URL:
+        raise ValueError("DATABASE_URL environment variable is not set on Render dashboard.")
+    
+    # Fix Render postgres:// -> postgresql:// URL format requirement
+    url = DATABASE_URL
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+        
+    return psycopg2.connect(url, cursor_factory=PostgresCursor)
 
 
 def insert_and_get_id(cursor, sql, params):
-    if DATABASE_URL:
-        cursor.execute(f"{sql} RETURNING id", params)
-        return cursor.fetchone()["id"]
-    cursor.execute(sql, params)
-    return cursor.lastrowid
+    cursor.execute(f"{sql} RETURNING id", params)
+    return cursor.fetchone()["id"]
 
 
 def init_db():
-    conn = get_db()
-    c = conn.cursor()
-    id_definition = "SERIAL PRIMARY KEY" if DATABASE_URL else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    timestamp_definition = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP" if DATABASE_URL else "TEXT DEFAULT (datetime('now'))"
-    schema = f"""
-        CREATE TABLE IF NOT EXISTS users (
-            id            {id_definition},
-            name          TEXT NOT NULL,
-            email         TEXT NOT NULL UNIQUE,
-            phone         TEXT NOT NULL,
-            id_number     TEXT NOT NULL UNIQUE,
-            password_hash TEXT NOT NULL,
-            salt          TEXT NOT NULL,
-            role          TEXT DEFAULT 'borrower',
-            created_at    {timestamp_definition}
-        );
+    try:
+        conn = get_db()
+        c = conn.cursor()
 
-        CREATE TABLE IF NOT EXISTS borrowers (
-            id         {id_definition},
-            user_id    INTEGER UNIQUE,
-            name       TEXT NOT NULL,
-            email      TEXT,
-            phone      TEXT,
-            id_number  TEXT,
-            created_at {timestamp_definition},
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        );
+        tables = [
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id            SERIAL PRIMARY KEY,
+                name          TEXT NOT NULL,
+                email         TEXT NOT NULL UNIQUE,
+                phone         TEXT NOT NULL,
+                id_number     TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                salt          TEXT NOT NULL,
+                role          TEXT DEFAULT 'borrower',
+                created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS borrowers (
+                id         SERIAL PRIMARY KEY,
+                user_id    INTEGER UNIQUE,
+                name       TEXT NOT NULL,
+                email      TEXT,
+                phone      TEXT,
+                id_number  TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS loans (
+                id                SERIAL PRIMARY KEY,
+                borrower_id       INTEGER NOT NULL,
+                principal         DOUBLE PRECISION NOT NULL,
+                reducing_rate     DOUBLE PRECISION NOT NULL,
+                tenure_months     INTEGER NOT NULL,
+                disbursement_date TEXT NOT NULL,
+                status            TEXT DEFAULT 'active',
+                created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (borrower_id) REFERENCES borrowers(id) ON DELETE CASCADE
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS installments (
+                id                SERIAL PRIMARY KEY,
+                loan_id           INTEGER NOT NULL,
+                installment_no    INTEGER NOT NULL,
+                due_date          TEXT NOT NULL,
+                amount            DOUBLE PRECISION NOT NULL,
+                principal_portion DOUBLE PRECISION NOT NULL,
+                interest_portion  DOUBLE PRECISION NOT NULL,
+                paid_date         TEXT,
+                status            TEXT DEFAULT 'pending',
+                FOREIGN KEY (loan_id) REFERENCES loans(id) ON DELETE CASCADE
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS sms_log (
+                id          SERIAL PRIMARY KEY,
+                phone       TEXT NOT NULL,
+                message     TEXT NOT NULL,
+                status      TEXT DEFAULT 'sent',
+                sent_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                borrower_id INTEGER,
+                loan_id     INTEGER
+            );
+            """
+        ]
 
-        CREATE TABLE IF NOT EXISTS loans (
-            id                {id_definition},
-            borrower_id       INTEGER NOT NULL,
-            principal         REAL NOT NULL,
-            reducing_rate         REAL NOT NULL,
-            tenure_months     INTEGER NOT NULL,
-            disbursement_date TEXT NOT NULL,
-            status            TEXT DEFAULT 'active',
-            created_at        {timestamp_definition},
-            FOREIGN KEY (borrower_id) REFERENCES borrowers(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS installments (
-            id                {id_definition},
-            loan_id           INTEGER NOT NULL,
-            installment_no    INTEGER NOT NULL,
-            due_date          TEXT NOT NULL,
-            amount            REAL NOT NULL,
-            principal_portion REAL NOT NULL,
-            interest_portion  REAL NOT NULL,
-            paid_date         TEXT,
-            status            TEXT DEFAULT 'pending',
-            FOREIGN KEY (loan_id) REFERENCES loans(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS sms_log (
-            id          {id_definition},
-            phone       TEXT NOT NULL,
-            message     TEXT NOT NULL,
-            status      TEXT DEFAULT 'sent',
-            sent_at     {timestamp_definition},
-            borrower_id INTEGER,
-            loan_id     INTEGER
-        );
-    """
-    for statement in schema.split(";"):
-        if statement.strip():
+        for statement in tables:
             c.execute(statement)
 
-    if DATABASE_URL:
+        # Migration check for flat_rate
         c.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema = current_schema() AND table_name = ?",
-            ("loans",),
+            """
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_schema = current_schema() AND table_name = %s;
+            """,
+            ("loans",)
         )
         loan_columns = {row["column_name"] for row in c.fetchall()}
-    else:
-        loan_columns = {row[1] for row in c.execute("PRAGMA table_info(loans)").fetchall()}
-    if "flat_rate" in loan_columns and "reducing_rate" not in loan_columns:
-        c.execute("ALTER TABLE loans RENAME COLUMN flat_rate TO reducing_rate")
+        
+        if "flat_rate" in loan_columns and "reducing_rate" not in loan_columns:
+            c.execute("ALTER TABLE loans RENAME COLUMN flat_rate TO reducing_rate;")
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+        conn.close()
+        print("Database initialized successfully.")
+    except Exception as e:
+        print(f"Database initialization warning: {e}")
 
+# Run DB initialization when module loads under Gunicorn
 init_db()
 
 
@@ -190,7 +203,6 @@ def validate_id_number(id_number):
 # ─── SMS HELPER ───────────────────────────────────────────────────────────────
 
 def normalize_phone(phone):
-    """Convert 07xx -> +2547xx for Africa's Talking."""
     phone = re.sub(r"\s+", "", str(phone))
     if phone.startswith("07") or phone.startswith("01"):
         return "+254" + phone[1:]
@@ -201,7 +213,6 @@ def normalize_phone(phone):
     return phone
 
 def send_sms(phone, message, borrower_id=None, loan_id=None):
-    """Send SMS via Africa's Talking. Logs every attempt to sms_log."""
     normalized = normalize_phone(phone)
     status = "queued"
 
@@ -216,14 +227,18 @@ def send_sms(phone, message, borrower_id=None, loan_id=None):
         status = "simulated"
         print(f"[SMS SIMULATION] To: {normalized}\n{message}\n")
 
-    conn = get_db()
-    c    = conn.cursor()
-    c.execute(
-        "INSERT INTO sms_log (phone, message, status, borrower_id, loan_id) VALUES (?,?,?,?,?)",
-        (normalized, message, status, borrower_id, loan_id)
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_db()
+        c    = conn.cursor()
+        c.execute(
+            "INSERT INTO sms_log (phone, message, status, borrower_id, loan_id) VALUES (?,?,?,?,?)",
+            (normalized, message, status, borrower_id, loan_id)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Failed to log SMS to DB: {e}")
+
     return status
 
 def build_reminder_sms(borrower_name, installment_no, amount, due_date, loan_id):
@@ -287,7 +302,6 @@ def register():
     conn.commit()
     conn.close()
 
-    # Welcome SMS
     send_sms(phone,
         f"Welcome to MnC Finance, {name}! Your account has been created. "
         f"Log in with your ID number to track your loans. - MnC Finance"
@@ -367,7 +381,6 @@ def get_all_reminders():
 
 @app.route("/reminders/send-all", methods=["POST"])
 def send_all_reminders():
-    """Send SMS reminders to all borrowers with installments due tomorrow."""
     conn     = get_db()
     c        = conn.cursor()
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -395,7 +408,6 @@ def send_all_reminders():
 
 @app.route("/reminders/send/<int:borrower_id>", methods=["POST"])
 def send_single_reminder(borrower_id):
-    """Send reminder SMS to one specific borrower for tomorrow."""
     conn     = get_db()
     c        = conn.cursor()
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -524,15 +536,7 @@ def delete_borrower(bid):
 
 # ─── LOANS ────────────────────────────────────────────────────────────────────
 
-
 def calculate_monthly_payment(principal, rate_percent, tenure_months):
-    """Compute the first repayment using the fixed-principal + reducing-balance formula.
-
-    The business rule is:
-      fixed principal share = principal / tenure_months
-      interest for the month = remaining balance * rate_percent / 100
-      total payment = fixed principal share + interest
-    """
     principal = float(principal)
     rate_percent = float(rate_percent)
     tenure_months = max(int(tenure_months), 1)
@@ -544,7 +548,6 @@ def calculate_monthly_payment(principal, rate_percent, tenure_months):
 
 
 def build_custom_schedule(principal, rate_percent, tenure_months):
-    """Return the amortization schedule for the custom reducing-balance formula."""
     principal = float(principal)
     rate_percent = float(rate_percent)
     tenure_months = int(tenure_months)
@@ -571,13 +574,6 @@ def build_custom_schedule(principal, rate_percent, tenure_months):
 
 
 def generate_installments(loan_id, principal, rate_percent, tenure_months, disbursement_date):
-    """Generate the loan repayment schedule using the client's reducing-balance formula.
-
-    Formula used for each month:
-      principal_share = principal / tenure_months
-      interest = remaining_balance * (rate / 100)
-      payment = principal_share + interest
-    """
     principal = float(principal)
     tenure_months = int(tenure_months)
     if principal <= 0 or tenure_months <= 0:
@@ -610,72 +606,9 @@ def generate_installments(loan_id, principal, rate_percent, tenure_months, disbu
     return schedule
 
 
-def generate_installments_declining_principal(loan_id, principal, monthly_rate_pct, tenure_months, disbursement_date):
-    """Backward-compatible wrapper for older fixed-principal logic.
-
-    The legacy caller supplies a monthly percentage, while the current loan
-    schedule expects the configured per-period percentage directly.
-    """
-    monthly_rate_pct = float(monthly_rate_pct)
-    return generate_installments(
-        loan_id,
-        principal,
-        monthly_rate_pct,
-        tenure_months,
-        disbursement_date,
-    )
-
-
 def flag_overdue(c):
     c.execute("UPDATE installments SET status='overdue' WHERE status='pending' AND due_date < ?",
               (date.today().isoformat(),))
-
-
-def recalculate_all_loan_installments():
-    """Rebuild all schedules using the reducing-balance method so older records are corrected."""
-    conn = get_db()
-    c = conn.cursor()
-    rows = c.execute("SELECT id, principal, reducing_rate, tenure_months, disbursement_date FROM loans").fetchall()
-    for row in rows:
-        existing = c.execute(
-            "SELECT installment_no, status, paid_date FROM installments WHERE loan_id=?",
-            (row["id"],),
-        ).fetchall()
-        paid_by_number = {
-            item["installment_no"]: (item["status"], item["paid_date"])
-            for item in existing
-            if item["status"] == "paid"
-        }
-        c.execute("DELETE FROM installments WHERE loan_id=?", (row["id"],))
-
-        start = date.fromisoformat(row["disbursement_date"])
-        schedule = build_custom_schedule(
-            row["principal"],
-            row["reducing_rate"],
-            row["tenure_months"],
-        )
-        for item in schedule:
-            installment_no = item["month"]
-            status, paid_date = paid_by_number.get(installment_no, ("pending", None))
-            due = start + relativedelta(months=installment_no)
-            c.execute(
-                """INSERT INTO installments
-                   (loan_id, installment_no, due_date, amount, principal_portion,
-                    interest_portion, paid_date, status)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    row["id"],
-                    installment_no,
-                    due.isoformat(),
-                    item["amount"],
-                    item["principal_portion"],
-                    item["interest_portion"],
-                    paid_date,
-                    status,
-                ),
-            )
-    conn.commit()
-    conn.close()
 
 
 @app.route("/loans", methods=["GET"])
@@ -736,7 +669,6 @@ def create_loan():
         data["disbursement_date"],
     )
 
-    # Loan disbursement SMS
     if borrower["phone"]:
         first_payment = calculate_monthly_payment(
             data["principal"], data["reducing_rate"], data["tenure_months"]
@@ -748,7 +680,7 @@ def create_loan():
         )
 
     conn2 = get_db()
-    row   = conn2.execute("""
+    row   = conn2.cursor().execute("""
         SELECT l.*, b.name as borrower_name
         FROM loans l JOIN borrowers b ON l.borrower_id = b.id WHERE l.id=?
     """, (loan_id,)).fetchone()
@@ -856,37 +788,17 @@ def dashboard():
     total_repaid    = q("SELECT COALESCE(SUM(amount),0) as s FROM installments WHERE status='paid'")["s"]
     arrears_count   = q("SELECT COUNT(*) as n FROM installments WHERE status='overdue'")["n"]
     arrears_amount  = q("SELECT COALESCE(SUM(amount),0) as s FROM installments WHERE status='overdue'")["s"]
-    total_borrowers = q("SELECT COUNT(*) as n FROM borrowers")["n"]
-    total_users     = q("SELECT COUNT(*) as n FROM users")["n"]
-    sms_sent_today  = q("SELECT COUNT(*) as n FROM sms_log WHERE sent_at >= CURRENT_DATE")["n"]
-
-    recent_loans = c.execute("""
-        SELECT l.id, l.principal, l.status, l.disbursement_date, b.name as borrower_name
-        FROM loans l JOIN borrowers b ON l.borrower_id=b.id
-        ORDER BY l.created_at DESC LIMIT 5
-    """).fetchall()
-
-    overdue_loans = c.execute("""
-        SELECT l.id, l.principal, b.name as borrower_name,
-               COUNT(i.id) as overdue_count, SUM(i.amount) as overdue_amount
-        FROM installments i
-        JOIN loans l ON i.loan_id=l.id
-        JOIN borrowers b ON l.borrower_id=b.id
-        WHERE i.status='overdue'
-        GROUP BY l.id, b.name ORDER BY overdue_amount DESC LIMIT 5
-    """).fetchall()
-
     conn.close()
+
     return jsonify({
-        "total_loans": total_loans, "active_loans": active_loans,
-        "closed_loans": closed_loans, "total_disbursed": total_disbursed,
-        "total_repaid": total_repaid, "arrears_count": arrears_count,
-        "arrears_amount": arrears_amount, "total_borrowers": total_borrowers,
-        "total_users": total_users, "sms_sent_today": sms_sent_today,
-        "recent_loans": [dict(r) for r in recent_loans],
-        "overdue_loans": [dict(r) for r in overdue_loans],
+        "total_loans": total_loans,
+        "active_loans": active_loans,
+        "closed_loans": closed_loans,
+        "total_disbursed": total_disbursed,
+        "total_repaid": total_repaid,
+        "arrears_count": arrears_count,
+        "arrears_amount": arrears_amount
     })
 
 if __name__ == "__main__":
-    recalculate_all_loan_installments()
-    app.run()
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
