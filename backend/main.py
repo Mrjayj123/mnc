@@ -38,7 +38,7 @@ app = Flask(__name__)
 allowed_origins = [
     origin.strip().rstrip("/")
     for origin in os.environ.get(
-        "FRONTEND_URL", "https://loan-tracker-roan.vercel.app"
+        "FRONTEND_URL", "https://mnc-flame.vercel.app"
     ).split(",")
     if origin.strip()
 ]
