@@ -788,6 +788,28 @@ def dashboard():
     total_repaid    = q("SELECT COALESCE(SUM(amount),0) as s FROM installments WHERE status='paid'")["s"]
     arrears_count   = q("SELECT COUNT(*) as n FROM installments WHERE status='overdue'")["n"]
     arrears_amount  = q("SELECT COALESCE(SUM(amount),0) as s FROM installments WHERE status='overdue'")["s"]
+    total_users     = q("SELECT COUNT(*) as n FROM users")["n"]
+    total_borrowers = q("SELECT COUNT(*) as n FROM borrowers")["n"]
+    sms_sent_today  = q("SELECT COUNT(*) as n FROM sms_log WHERE sent_at::date = CURRENT_DATE")["n"]
+
+    recent_loans = c.execute("""
+        SELECT l.id, l.principal, l.status, b.name as borrower_name
+        FROM loans l JOIN borrowers b ON l.borrower_id = b.id
+        ORDER BY l.created_at DESC LIMIT 5
+    """).fetchall()
+
+    overdue_loans = c.execute("""
+        SELECT l.id, b.name as borrower_name,
+               COUNT(i.id) as overdue_count,
+               COALESCE(SUM(i.amount),0) as overdue_amount
+        FROM loans l
+        JOIN borrowers b ON l.borrower_id = b.id
+        JOIN installments i ON i.loan_id = l.id AND i.status = 'overdue'
+        GROUP BY l.id, b.name
+        ORDER BY overdue_amount DESC
+        LIMIT 10
+    """).fetchall()
+
     conn.close()
 
     return jsonify({
@@ -797,7 +819,12 @@ def dashboard():
         "total_disbursed": total_disbursed,
         "total_repaid": total_repaid,
         "arrears_count": arrears_count,
-        "arrears_amount": arrears_amount
+        "arrears_amount": arrears_amount,
+        "total_users": total_users,
+        "total_borrowers": total_borrowers,
+        "sms_sent_today": sms_sent_today,
+        "recent_loans": [dict(r) for r in recent_loans],
+        "overdue_loans": [dict(r) for r in overdue_loans],
     })
 
 if __name__ == "__main__":
