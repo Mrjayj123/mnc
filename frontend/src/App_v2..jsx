@@ -727,6 +727,9 @@ function AdminDashboard() {
 
   if (loading) return <p className="text-slate-400">Loading…</p>;
   if (!data)   return null;
+  const recentLoans  = data.recent_loans  || [];
+  const overdueLoans = data.overdue_loans || [];
+  
 
   return (
     <div className="space-y-8">
