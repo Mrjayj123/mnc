@@ -237,10 +237,6 @@ function LoginPage({ onLogin, onSwitch }) {
             </p>
           </div>
 
-          <div className="mt-4 bg-white/5 rounded-xl p-3">
-            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Admin access</p>
-            <p className="text-xs text-slate-400 font-mono">ID: <span className="text-slate-300">00000000</span> · Pass: <span className="text-slate-300">Admin@MnC1</span></p>
-          </div>
         </div>
       </div>
     </div>
@@ -727,9 +723,12 @@ function AdminDashboard() {
 
   if (loading) return <p className="text-slate-400">Loading…</p>;
   if (!data)   return null;
-  const recentLoans  = data.recent_loans  || [];
-  const overdueLoans = data.overdue_loans || [];
-  
+
+  // Defensive defaults: tolerate an API response that's missing these
+  // fields (older backend deploy, schema change, etc.) instead of
+  // crashing the whole admin portal.
+  const recentLoans  = data.recent_loans  ?? [];
+  const overdueLoans = data.overdue_loans ?? [];
 
   return (
     <div className="space-y-8">
@@ -738,20 +737,20 @@ function AdminDashboard() {
         <KPICard label="Total Disbursed"  value={fmt(data.total_disbursed)}  sub={`${data.total_loans} loans`}       accent="blue" />
         <KPICard label="Repaid"           value={fmt(data.total_repaid)}     sub={`${data.closed_loans} closed`}     accent="emerald" />
         <KPICard label="Arrears"          value={fmt(data.arrears_amount)}   sub={`${data.arrears_count} overdue`}   accent="red" />
-        <KPICard label="Registered Users" value={data.total_users ?? "—"}   sub={`${data.total_borrowers} borrowers`} accent="purple" />
+        <KPICard label="Registered Users" value={data.total_users ?? "—"}   sub={`${data.total_borrowers ?? 0} borrowers`} accent="purple" />
         <KPICard label="SMS Sent Today"    value={data.sms_sent_today ?? 0}  sub="via Africa's Talking"               accent="slate" />
       </div>
       <div className="grid md:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
           <h3 className="font-semibold text-slate-700 mb-4 text-sm uppercase tracking-wider">Recent Loans</h3>
-          {data.recent_loans.length === 0
+          {recentLoans.length === 0
             ? <p className="text-slate-400 text-sm">No loans yet.</p>
             : (
               <table className="w-full text-sm">
                 <thead><tr className="text-slate-400 text-xs uppercase border-b border-slate-50">
                   <th className="pb-2 text-left">Borrower</th><th className="pb-2 text-right">Principal</th><th className="pb-2 text-right">Status</th>
                 </tr></thead>
-                <tbody>{data.recent_loans.map(l => (
+                <tbody>{recentLoans.map(l => (
                   <tr key={l.id} className="border-b border-slate-50 last:border-0">
                     <td className="py-2 text-slate-700 font-medium">{l.borrower_name}</td>
                     <td className="py-2 text-right text-slate-600">{fmt(l.principal)}</td>
@@ -763,14 +762,14 @@ function AdminDashboard() {
         </div>
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
           <h3 className="font-semibold text-red-600 mb-4 text-sm uppercase tracking-wider">⚠ Overdue Loans</h3>
-          {data.overdue_loans.length === 0
+          {overdueLoans.length === 0
             ? <p className="text-slate-400 text-sm">No overdue installments.</p>
             : (
               <table className="w-full text-sm">
                 <thead><tr className="text-slate-400 text-xs uppercase border-b border-slate-50">
                   <th className="pb-2 text-left">Borrower</th><th className="pb-2 text-right">Missed</th><th className="pb-2 text-right">Amount Due</th>
                 </tr></thead>
-                <tbody>{data.overdue_loans.map(l => (
+                <tbody>{overdueLoans.map(l => (
                   <tr key={l.id} className="border-b border-slate-50 last:border-0">
                     <td className="py-2 text-slate-700 font-medium">{l.borrower_name}</td>
                     <td className="py-2 text-right text-slate-500">{l.overdue_count} inst.</td>
