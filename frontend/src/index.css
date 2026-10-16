@@ -1,1 +1,206 @@
 @import "tailwindcss";
+
+.app-theme {
+  min-height: 100vh;
+  background: #f8fafc;
+  color: #0f172a;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.app-theme[data-theme="dark"] {
+  color-scheme: dark;
+  background: #0b1220;
+  color: #e2e8f0;
+}
+
+.app-theme[data-theme="dark"] [class~="bg-slate-50"] {
+  background-color: #111c2d;
+}
+
+.app-theme[data-theme="dark"] [class~="bg-slate-100"] {
+  background-color: #1e293b;
+}
+
+.app-theme[data-theme="dark"] [class~="bg-white"] {
+  background-color: #172334;
+}
+
+.app-theme[data-theme="dark"] [class~="bg-blue-50"] {
+  background-color: #142c4d;
+}
+
+.app-theme[data-theme="dark"] [class~="bg-blue-100"] {
+  background-color: #1e3a5f;
+}
+
+.app-theme[data-theme="dark"] [class~="bg-emerald-50"] {
+  background-color: #123329;
+}
+
+.app-theme[data-theme="dark"] [class~="bg-emerald-100"] {
+  background-color: #14532d;
+}
+
+.app-theme[data-theme="dark"] [class~="bg-amber-50"] {
+  background-color: #3b2d13;
+}
+
+.app-theme[data-theme="dark"] [class~="bg-amber-100"] {
+  background-color: #57400f;
+}
+
+.app-theme[data-theme="dark"] [class~="bg-red-50"] {
+  background-color: #3b1d27;
+}
+
+.app-theme[data-theme="dark"] [class~="bg-red-100"] {
+  background-color: #571f2b;
+}
+
+.app-theme[data-theme="dark"] [class~="bg-purple-100"] {
+  background-color: #38245f;
+}
+
+.app-theme[data-theme="dark"] [class~="text-slate-800"],
+.app-theme[data-theme="dark"] [class~="text-slate-700"] {
+  color: #e2e8f0;
+}
+
+.app-theme[data-theme="dark"] [class~="text-slate-600"],
+.app-theme[data-theme="dark"] [class~="text-slate-500"] {
+  color: #cbd5e1;
+}
+
+.app-theme[data-theme="dark"] [class~="text-slate-400"] {
+  color: #94a3b8;
+}
+
+.app-theme[data-theme="dark"] [class~="text-blue-700"] {
+  color: #93c5fd;
+}
+
+.app-theme[data-theme="dark"] [class~="text-blue-600"] {
+  color: #60a5fa;
+}
+
+.app-theme[data-theme="dark"] [class~="text-emerald-800"],
+.app-theme[data-theme="dark"] [class~="text-emerald-700"] {
+  color: #86efac;
+}
+
+.app-theme[data-theme="dark"] [class~="text-amber-800"],
+.app-theme[data-theme="dark"] [class~="text-amber-700"] {
+  color: #fcd34d;
+}
+
+.app-theme[data-theme="dark"] [class~="text-red-700"],
+.app-theme[data-theme="dark"] [class~="text-red-600"] {
+  color: #fca5a5;
+}
+
+.app-theme[data-theme="dark"] [class~="text-purple-600"] {
+  color: #c4b5fd;
+}
+
+.app-theme[data-theme="dark"] [class~="border-slate-50"],
+.app-theme[data-theme="dark"] [class~="border-slate-100"] {
+  border-color: #293548;
+}
+
+.app-theme[data-theme="dark"] [class~="border-slate-200"] {
+  border-color: #3b4a60;
+}
+
+.app-theme[data-theme="dark"] [class~="border-blue-100"] {
+  border-color: #24466e;
+}
+
+.app-theme[data-theme="dark"] [class~="border-amber-200"] {
+  border-color: #765a20;
+}
+
+.app-theme[data-theme="dark"] [class~="border-red-100"] {
+  border-color: #71303b;
+}
+
+.app-theme[data-theme="dark"] input,
+.app-theme[data-theme="dark"] select {
+  color-scheme: dark;
+}
+
+.app-theme[data-theme="dark"] input:not([class~="bg-white/10"]),
+.app-theme[data-theme="dark"] select {
+  background-color: #111c2d;
+  color: #e2e8f0;
+}
+
+.app-theme[data-theme="dark"] option {
+  background-color: #172334;
+  color: #e2e8f0;
+}
+
+.app-theme[data-theme="dark"] tr:hover {
+  background-color: #1e293b;
+}
+
+.app-theme[data-theme="light"] .auth-screen {
+  background-image: linear-gradient(to bottom right, #e2e8f0, #dbeafe, #e2e8f0);
+}
+
+.app-theme[data-theme="light"] .auth-screen [class~="bg-white/10"] {
+  background-color: rgb(255 255 255 / 90%);
+  border-color: #cbd5e1;
+}
+
+.app-theme[data-theme="light"] .auth-screen h1,
+.app-theme[data-theme="light"] .auth-screen h2 {
+  color: #0f172a;
+}
+
+.app-theme[data-theme="light"] .auth-screen [class~="text-slate-300"],
+.app-theme[data-theme="light"] .auth-screen [class~="text-slate-400"] {
+  color: #475569;
+}
+
+.app-theme[data-theme="light"] .auth-screen [class~="text-blue-300"] {
+  color: #1d4ed8;
+}
+
+.app-theme[data-theme="light"] .auth-screen input {
+  background-color: #fff;
+  color: #0f172a;
+}
+
+.app-theme[data-theme="light"] .auth-screen input::placeholder {
+  color: #64748b;
+}
+
+@media (max-width: 767px) {
+  .app-theme [class~="grid-cols-3"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-theme [class~="grid-cols-2"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-theme table {
+    min-width: 640px;
+  }
+
+  .app-theme div:has(> table) {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .app-theme [class~="grid-cols-2"] > *,
+  .app-theme [class~="grid-cols-3"] > * {
+    min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-theme {
+    transition: none;
+  }
+}

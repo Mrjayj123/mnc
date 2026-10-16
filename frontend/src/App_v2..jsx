@@ -117,6 +117,22 @@ function Select({ label, children, ...props }) {
   );
 }
 
+function ThemeToggle({ theme, onToggle }) {
+  const dark = theme === "dark";
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={`Switch to ${dark ? "light" : "dark"} theme`}
+      aria-pressed={dark}
+      className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50"
+    >
+      <span aria-hidden="true">{dark ? "☀️" : "🌙"}</span>
+      <span className="hidden sm:inline">{dark ? "Light" : "Dark"} mode</span>
+    </button>
+  );
+}
+
 // ─── REMINDER BANNER ─────────────────────────────────────────────────────────
 
 function ReminderBanner({ reminders }) {
@@ -143,12 +159,19 @@ function ReminderBanner({ reminders }) {
 
 // ─── AUTH PAGES ───────────────────────────────────────────────────────────────
 
-function AuthPage({ onLogin }) {
+function AuthPage({ onLogin, theme, onToggleTheme }) {
   const [mode, setMode] = useState("login"); // "login" | "register"
 
-  return mode === "login"
-    ? <LoginPage onLogin={onLogin} onSwitch={() => setMode("register")} />
-    : <RegisterPage onSwitch={() => setMode("login")} onRegistered={() => setMode("login")} />;
+  return (
+    <>
+      <div className="fixed right-4 top-4 z-10">
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+      </div>
+      {mode === "login"
+        ? <LoginPage onLogin={onLogin} onSwitch={() => setMode("register")} />
+        : <RegisterPage onSwitch={() => setMode("login")} onRegistered={() => setMode("login")} />}
+    </>
+  );
 }
 
 function LoginPage({ onLogin, onSwitch }) {
@@ -176,7 +199,7 @@ function LoginPage({ onLogin, onSwitch }) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+    <div className="auth-screen min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
       <div className="absolute inset-0 opacity-5"
         style={{ backgroundImage: "linear-gradient(#fff 1px,transparent 1px),linear-gradient(90deg,#fff 1px,transparent 1px)", backgroundSize: "40px 40px" }} />
 
@@ -305,7 +328,7 @@ function RegisterPage({ onSwitch, onRegistered }) {
   })();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+    <div className="auth-screen min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
       <div className="absolute inset-0 opacity-5"
         style={{ backgroundImage: "linear-gradient(#fff 1px,transparent 1px),linear-gradient(90deg,#fff 1px,transparent 1px)", backgroundSize: "40px 40px" }} />
 
@@ -512,7 +535,7 @@ function LoanScheduleModal({ loan, onClose, readonly }) {
 // BORROWER PORTAL
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function BorrowerPortal({ user, onLogout }) {
+function BorrowerPortal({ user, onLogout, theme, onToggleTheme }) {
   const [loans, setLoans]           = useState([]);
   const [reminders, setReminders]   = useState([]);
   const [selectedLoan, setSelectedLoan] = useState(null);
@@ -537,22 +560,22 @@ function BorrowerPortal({ user, onLogout }) {
   const closedLoans    = loans.filter(l => l.status === "closed");
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
       {/* Sidebar */}
-      <aside className="w-56 bg-white border-r border-slate-100 flex flex-col shadow-sm">
-        <div className="px-5 py-6 border-b border-slate-100">
+      <aside className="w-full shrink-0 bg-white border-b md:border-b-0 md:border-r border-slate-100 flex flex-col shadow-sm md:w-56 md:min-h-screen">
+        <div className="px-5 py-4 md:py-6 border-b border-slate-100">
           <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">MnC Finance</p>
           <h1 className="text-xl font-bold text-slate-800 mt-0.5">LoanTrack</h1>
         </div>
-        <div className="flex-1 px-5 py-6">
-          <p className="text-xs text-slate-400 uppercase tracking-wider font-medium mb-3">My Portal</p>
+        <div className="flex-1 px-5 py-3 md:py-6">
+          <p className="hidden md:block text-xs text-slate-400 uppercase tracking-wider font-medium mb-3">My Portal</p>
           <div className="space-y-1">
             <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium">
               <span>💼</span> My Loans
             </div>
           </div>
         </div>
-        <div className="px-4 py-4 border-t border-slate-100">
+        <div className="px-4 py-3 md:py-4 border-t border-slate-100 flex items-center justify-between gap-3 md:block">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-sm font-bold text-blue-600 shrink-0">
               {user.name.charAt(0).toUpperCase()}
@@ -563,17 +586,20 @@ function BorrowerPortal({ user, onLogout }) {
             </div>
           </div>
           <button onClick={onLogout}
-            className="w-full text-xs font-semibold text-slate-500 hover:text-red-500 hover:bg-red-50 px-3 py-2 rounded-lg transition text-left">
+            className="w-auto md:w-full text-xs font-semibold text-slate-500 hover:text-red-500 hover:bg-red-50 px-3 py-2 rounded-lg transition text-left">
             Sign out
           </button>
         </div>
       </aside>
 
       {/* Main */}
-      <main className="flex-1 p-8 overflow-y-auto space-y-6">
-        <div>
+      <main className="min-w-0 flex-1 p-4 md:p-8 overflow-x-hidden space-y-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
           <h1 className="text-2xl font-bold text-slate-800">My Loan Dashboard</h1>
           <p className="text-slate-500 text-sm mt-0.5">Welcome back, <strong>{user.name}</strong>. Here's your loan overview.</p>
+          </div>
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
 
         <ReminderBanner reminders={reminders} />
@@ -660,7 +686,7 @@ const ADMIN_NAV = [
   { id: "smslog",     label: "SMS Log",    icon: "📨" },
 ];
 
-function AdminPortal({ user, onLogout }) {
+function AdminPortal({ user, onLogout, theme, onToggleTheme }) {
   const [view, setView]           = useState("dashboard");
   const [borrowers, setBorrowers] = useState([]);
 
@@ -669,21 +695,21 @@ function AdminPortal({ user, onLogout }) {
   }, [view]);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      <aside className="w-56 bg-white border-r border-slate-100 flex flex-col shadow-sm">
-        <div className="px-5 py-6 border-b border-slate-100">
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+      <aside className="w-full shrink-0 bg-white border-b md:border-b-0 md:border-r border-slate-100 flex flex-col shadow-sm md:w-56 md:min-h-screen">
+        <div className="px-4 py-3 md:px-5 md:py-6 border-b border-slate-100">
           <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">MnC Admin</p>
           <h1 className="text-xl font-bold text-slate-800 mt-0.5">LoanTrack</h1>
         </div>
-        <nav className="flex-1 py-4 px-3 space-y-1">
+        <nav className="flex md:flex-1 overflow-x-auto md:overflow-x-visible py-2 md:py-4 px-2 md:px-3 gap-1 md:gap-0 md:flex-col md:space-y-1">
           {ADMIN_NAV.map(item => (
             <button key={item.id} onClick={() => setView(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${view === item.id ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}>
+              className={`w-auto shrink-0 md:w-full flex items-center gap-2 md:gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${view === item.id ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}>
               <span>{item.icon}</span>{item.label}
             </button>
           ))}
         </nav>
-        <div className="px-4 py-4 border-t border-slate-100">
+        <div className="px-4 py-2 md:py-4 border-t border-slate-100 flex items-center justify-between gap-3 md:block">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center text-sm font-bold text-purple-600 shrink-0">A</div>
             <div className="min-w-0">
@@ -692,13 +718,16 @@ function AdminPortal({ user, onLogout }) {
             </div>
           </div>
           <button onClick={onLogout}
-            className="w-full text-xs font-semibold text-slate-500 hover:text-red-500 hover:bg-red-50 px-3 py-2 rounded-lg transition text-left">
+            className="w-auto md:w-full text-xs font-semibold text-slate-500 hover:text-red-500 hover:bg-red-50 px-3 py-2 rounded-lg transition text-left">
             Sign out
           </button>
         </div>
       </aside>
 
-      <main className="flex-1 p-8 overflow-y-auto">
+      <main className="min-w-0 flex-1 p-4 md:p-8 overflow-x-hidden">
+        <div className="flex justify-end mb-4">
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        </div>
         {view === "dashboard" && <AdminDashboard />}
         {view === "users"     && <AdminUsers />}
         {view === "borrowers" && <AdminBorrowers />}
@@ -1553,8 +1582,19 @@ function SendReminderBtn({ borrower_name, loan_id, phone }) {
 
 export default function App() {
   const [user, setUser] = useState(null);
+  const [theme, setTheme] = useState(() => localStorage.getItem("mnc-theme") || "light");
 
-  if (!user) return <AuthPage onLogin={setUser} />;
-  if (user.role === "admin") return <AdminPortal user={user} onLogout={() => setUser(null)} />;
-  return <BorrowerPortal user={user} onLogout={() => setUser(null)} />;
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("mnc-theme", theme);
+  }, [theme]);
+
+  const onToggleTheme = () => setTheme(current => current === "dark" ? "light" : "dark");
+  const content = !user
+    ? <AuthPage onLogin={setUser} theme={theme} onToggleTheme={onToggleTheme} />
+    : user.role === "admin"
+      ? <AdminPortal user={user} onLogout={() => setUser(null)} theme={theme} onToggleTheme={onToggleTheme} />
+      : <BorrowerPortal user={user} onLogout={() => setUser(null)} theme={theme} onToggleTheme={onToggleTheme} />;
+
+  return <div className="app-theme" data-theme={theme}>{content}</div>;
 }
